@@ -177,7 +177,15 @@ class PostgreSQL implements IQuarkDataProvider, IQuarkSQLDataProvider {
 
 				foreach ($out as $record) {
 					foreach ($record as $key => &$value) {
-						if (isset($fields->$key) && ($fields->$key instanceof QuarkCollection || ($fields->$key instanceof IQuarkModel && !($fields->$key instanceof QuarkLocalizedString)) || is_array($fields->$key)) && QuarkJSONIOProcessor::IsValid($value))
+						if (!isset($fields->$key)) continue;
+						
+						if ($fields->$key === true && $record[$key] == 't')
+							$record[$key] = true;
+						
+						if ($fields->$key === false && $record[$key] == 'f')
+							$record[$key] = false;
+						
+						if (($fields->$key instanceof QuarkCollection || ($fields->$key instanceof IQuarkModel && !($fields->$key instanceof QuarkLocalizedString)) || is_array($fields->$key)) && QuarkJSONIOProcessor::IsValid($value))
 							$record[$key] = json_decode($value);
 					}
 

@@ -30180,6 +30180,8 @@ class QuarkSQL {
 	const OPTION_JOIN = 'option.join';
 	const OPTION_GROUP_BY = 'option.group_by';
 	const OPTION_SECURE = 'option.secure';
+	const OPTION_DISTINCT = 'option.distinct';
+	const OPTION_MASQUERADE = 'option.masquerade';
 
 	const FIELD_COUNT_ALL = 'COUNT(*)';
 
@@ -30775,8 +30777,20 @@ class QuarkSQL {
 
 			unset($i, $join, $join_target);
 		}
+		
+		$distinct = '';
+		if (isset($options[self::OPTION_DISTINCT]) && $options[self::OPTION_DISTINCT])
+			$distinct = 'DISTINCT ';
+		
+		$masks = array();
+		if (isset($options[self::OPTION_MASQUERADE]) && is_array($options[self::OPTION_MASQUERADE])) {
+			foreach ($options[self::OPTION_MASQUERADE] as $key => &$value)
+				$masks[] = $this->Field($value) . ' AS ' . $this->Field($key);
+			
+			unset($key, $value);
+		}
 
-		return 'SELECT ' . $query_fields . ' FROM ' . $table . (isset($options[self::OPTION_ALIAS]) ? ' AS ' . $this->Field($options[self::OPTION_ALIAS]) : '') . $joins . $this->Condition($criteria) . $this->_cursor($options);
+		return 'SELECT ' . $distinct . $query_fields . (sizeof($masks) == 0 ? '' : ', '. implode(', ', $masks)) . ' FROM ' . $table . (isset($options[self::OPTION_ALIAS]) ? ' AS ' . $this->Field($options[self::OPTION_ALIAS]) : '') . $joins . $this->Condition($criteria) . $this->_cursor($options);
 	}
 
 	/**
