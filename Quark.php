@@ -30767,12 +30767,13 @@ class QuarkSQL {
 			$join_target = null;
 
 			foreach ($options[self::OPTION_JOIN] as $i => &$join) {
+				if (is_object($join)) $join = (array)$join;
 				if (!is_array($join) || !isset($join[self::FLAG_JOIN_MODE]) || !isset($join[self::FLAG_JOIN_CONDITION])) continue;
 
 				$join_target = $this->_subquery($join);
-				if ($join_target == null) continue;
+				if ($join_target === null) continue;
 
-				$joins .= ' ' . $join[self::FLAG_JOIN_MODE] . ' JOIN ' . $join_target . (isset($join[self::FLAG_JOIN_ALIAS]) && $join[self::FLAG_JOIN_ALIAS] != '' ? ' AS ' . $this->Field($join[self::FLAG_JOIN_ALIAS]) : '') . ' ON ' . $this->Condition($join[self::FLAG_JOIN_CONDITION], ' AND ');
+				$joins .= ' ' . $join[self::FLAG_JOIN_MODE] . ' JOIN ' . $join_target . (isset($join[self::FLAG_JOIN_ALIAS]) && $join[self::FLAG_JOIN_ALIAS] != '' ? ' AS ' . $this->Field($join[self::FLAG_JOIN_ALIAS]) : '') . ' ON ' . $this->Condition(json_decode(json_encode($join[self::FLAG_JOIN_CONDITION]), true), ' AND ');
 			}
 
 			unset($i, $join, $join_target);
