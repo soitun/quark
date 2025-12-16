@@ -18185,9 +18185,9 @@ class QuarkClient implements IQuarkEventable {
 	private $_aliveLast = null;
 
 	/**
-	 * @var bool $_sendLoopbackFix = true
+	 * @var bool $_sendLoopbackFix = false
 	 */
-	private $_sendLoopbackFix = true;
+	private $_sendLoopbackFix = false;
 
 	/**
 	 * @var int $_sendLoopbackFixTimeout = self::SEND_LOOPBACK_FIX_TIMEOUT
@@ -18494,11 +18494,11 @@ class QuarkClient implements IQuarkEventable {
 	}
 
 	/**
-	 * @param bool $flag = true
+	 * @param bool $flag = false
 	 *
 	 * @return bool
 	 */
-	public function SendLoopbackFix ($flag = true) {
+	public function SendLoopbackFix ($flag = false) {
 		if (func_num_args() != 0)
 			$this->_sendLoopbackFix = $flag;
 
@@ -19889,6 +19889,8 @@ class QuarkStreamEnvironment implements IQuarkEnvironment, IQuarkCluster {
 	const COMMAND_INFRASTRUCTURE = 'infrastructure';
 	const COMMAND_ENDPOINT = 'endpoint';
 
+	const PAYLOAD_LOOPBACK_FIX = '{"url":""}';
+
 	use QuarkEvent;
 
 	/**
@@ -19935,6 +19937,16 @@ class QuarkStreamEnvironment implements IQuarkEnvironment, IQuarkCluster {
 	 * @var bool $_logEvents = true
 	 */
 	private $_logEvents = true;
+
+	/**
+	 * @var bool $_serverSendLoopbackFix = false
+	 */
+	private $_serverSendLoopbackFix = false;
+
+	/**
+	 * @var bool $_networkServerSendLoopbackFix = true
+	 */
+	private $_networkServerSendLoopbackFix = true;
 
 	/**
 	 * @var bool $_controllerFromConfig = false
@@ -20501,6 +20513,30 @@ class QuarkStreamEnvironment implements IQuarkEnvironment, IQuarkCluster {
 	}
 
 	/**
+	 * @param bool $flag = false
+	 *
+	 * @return bool
+	 */
+	public function ServerSendLoopbackFix ($flag = false) {
+		if (func_num_args() != 0)
+			$this->_serverSendLoopbackFix = $flag;
+
+		return $this->_serverSendLoopbackFix;
+	}
+
+	/**
+	 * @param bool $flag = false
+	 *
+	 * @return bool
+	 */
+	public function NetworkServerSendLoopbackFix ($flag = false) {
+		if (func_num_args() != 0)
+			$this->_networkServerSendLoopbackFix = $flag;
+
+		return $this->_networkServerSendLoopbackFix;
+	}
+
+	/**
 	 * @return string
 	 */
 	public function EnvironmentKind () {
@@ -20570,6 +20606,14 @@ class QuarkStreamEnvironment implements IQuarkEnvironment, IQuarkCluster {
 
 		if (isset($ini->ExternalClientAliveTimeout))
 			$this->ServerClientAliveTimeout($ini->ExternalClientAliveTimeout);
+
+		if (isset($ini->ExternalServerSendLoopbackFix))
+			$this->ServerSendLoopbackFix($ini->ExternalServerSendLoopbackFix);
+
+		if (isset($ini->InternalServerSendLoopbackFix))
+			$this->NetworkServerSendLoopbackFix($ini->InternalServerSendLoopbackFix);
+
+		// TODO: add loopback send fix for controller
 
 		if (isset($ini->Dedicated))
 			$this->Dedicated($ini->Dedicated);
@@ -20722,7 +20766,9 @@ class QuarkStreamEnvironment implements IQuarkEnvironment, IQuarkCluster {
 		$this->_log('cluster.node.client.connect', $client . ' -> ' . $this->_cluster->Server());
 
 		//$this->_announce();
-		$client->SendLoopbackFixData('{"url":""}');
+
+		$client->SendLoopbackFix($this->_serverSendLoopbackFix);
+		$client->SendLoopbackFixData(self::PAYLOAD_LOOPBACK_FIX);
 
 		if ($this->_connect)
 			$this->_pipe($this->_connect, 'StreamConnect', $client);
@@ -20820,6 +20866,9 @@ class QuarkStreamEnvironment implements IQuarkEnvironment, IQuarkCluster {
 	 */
 	public function NetworkServerConnect (QuarkClient $node) {
 		$this->_log('cluster.node.node.server.connect', $node . ' -> ' . $this->_cluster->Network()->Server());
+
+		$node->SendLoopbackFix($this->_networkServerSendLoopbackFix);
+		$node->SendLoopbackFixData(self::PAYLOAD_LOOPBACK_FIX);
 
 		$this->_announce();
 
