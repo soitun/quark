@@ -10,70 +10,70 @@ use Quark\QuarkHTMLIOProcessor;
 /**
  * Class WebSocketNetworkTransportServer
  *
- * http://habrahabr.ru/company/ifree/blog/209864/
- * http://www.iana.org/assignments/websocket/websocket.xml
- * http://www.askdev.ru/a/26682
- * http://www.sanwebe.com/2013/05/chat-using-websocket-php-socket
- *
- * @important
- * http://www.lenholgate.com/blog/2011/07/websockets-is-a-stream-not-a-message-based-protocol.html
- * http://stackoverflow.com/questions/31265789/websocket-invalid-frame-header#comment50526750_31265789
- * https://github.com/CycloneCode/WSServer/blob/master/src/WSServer.php
- * https://github.com/Cyclonecode/WSServer/blob/master/src/WSFrame.php
- *
  * @package Quark\NetworkTransports
  */
 class WebSocketNetworkTransportServer implements IQuarkNetworkTransport {
 	const GuID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
-	const OP_CONTINUATION = 0X0;
+	const OP_CONTINUATION = 0x0;
 	const OP_TEXT = 0x1;
 	const OP_BINARY = 0x2;
 	const OP_CLOSE = 0x8;
-	const OP_PING = 0x09;
-	const OP_PONG = 0x0A;
-	
-	const FRAME_MIN_SIZE = 2;
-	
+	const OP_PING = 0x9;
+	const OP_PONG = 0xA;
+
 	/**
-	 * @var string $_buffer = ''
+	 * @var string $_buffer
 	 */
 	private $_buffer = '';
 
 	/**
-	 * @var bool $_connected = false
+	 * @var string $_msgBuffer
+	 */
+	private $_msgBuffer = '';
+
+	/**
+	 * @var int|null $_fragmentedOpcode
+	 */
+	private $_fragmentedOpcode = null;
+
+	/**
+	 * @var bool $_connected
 	 */
 	private $_connected = false;
 
 	/**
-	 * @var string $_subProtocol = ''
+	 * @var string $_subProtocol
 	 */
 	private $_subProtocol = '';
 
 	/**
-	 * @param QuarkClient &$client
+	 * @param QuarkClient $client
 	 *
-	 * @return void
+	 * @return mixed
 	 */
 	public function EventConnect (QuarkClient &$client) {
 		// TODO: Implement EventConnect() method.
 	}
 
 	/**
-	 * @param QuarkClient &$client
+	 * @param QuarkClient $client
 	 * @param string $data
 	 *
-	 * @return void
+	 * @return mixed
 	 */
 	public function EventData (QuarkClient &$client, $data) {
 		$this->_buffer .= $data;
 
 		if ($this->_connected) {
-			$input = self::FrameIn($this->_buffer);
-			$this->_buffer = '';
-			
-			if ($input !== null)
-				$client->TriggerData($input);
+			while (true) {
+				$payload = $this->FrameIn($this->_buffer, $client);
+
+				if ($payload === null) break;
+				if ($payload === false) continue;
+
+				$client->TriggerData($payload);
+			}
 		}
 		else {
 			if (!preg_match(QuarkDTO::HTTP_PROTOCOL_REQUEST, $this->_buffer)) return;
@@ -104,9 +104,9 @@ class WebSocketNetworkTransportServer implements IQuarkNetworkTransport {
 	}
 
 	/**
-	 * @param QuarkClient &$client
+	 * @param QuarkClient $client
 	 *
-	 * @return void
+	 * @return mixed
 	 */
 	public function EventClose (QuarkClient &$client) {
 		$client->TriggerClose();
@@ -115,7 +115,7 @@ class WebSocketNetworkTransportServer implements IQuarkNetworkTransport {
 	/**
 	 * @param string $data
 	 *
-	 * @return mixed
+	 * @return string
 	 */
 	public function Send ($data) {
 		return $this->_connected ? self::FrameOut($data) : $data;
@@ -123,55 +123,141 @@ class WebSocketNetworkTransportServer implements IQuarkNetworkTransport {
 
 	/**
 	 * @param string $data
+	 * @param QuarkClient $client = null
 	 *
-	 * @return string
+	 * @return string|false|null
 	 */
-	public static function FrameIn ($data) {
-		if (!isset($data[1])) return null;
-		
-		$length = ord($data[1]) & 127;
+	private function FrameIn (&$data, QuarkClient $client = null) {
+		$bufLen = strlen($data);
+		if ($bufLen < 2) return null;
 
-		if ($length == 126) {
-			$masks = substr($data, 4, 4);
-			$data = substr($data, 8);
+		$first = ord($data[0]);
+		$second = ord($data[1]);
+
+		$fin = ($first & 0x80) === 0x80;
+		$opcode = $first & 0x0f;
+
+		$masked = ($second & 0x80) === 0x80;
+		$payloadLen = $second & 0x7f;
+
+		$offset = 2;
+
+		// extended lengths
+		if ($payloadLen === 126) {
+			if ($bufLen < $offset + 2) return null;
+
+			$ext = substr($data, $offset, 2);
+			$un = unpack('n', $ext);
+			$payloadLen = $un[1];
+			$offset += 2;
 		}
-		elseif ($length == 127) {
-			$masks = substr($data, 10, 4);
-			$data = substr($data, 14);
-		}
-		else {
-			$masks = substr($data, 2, 4);
-			$data = substr($data, 6);
+		elseif ($payloadLen === 127) {
+			if ($bufLen < $offset + 8) return null;
+
+			$ext = substr($data, $offset, 8);
+			$parts = array_values(unpack('N2', $ext));
+			$payloadLen = ($parts[0] << 32) + $parts[1];
+			$offset += 8;
 		}
 
-		$out = '';
-		$i = 0;
-		$len = strlen($data);
+		$maskKey = '';
+		if ($masked) {
+			if ($bufLen < $offset + 4) return null;
 
-		while ($i < $len) {
-			$out .= $data[$i] ^ $masks[$i % 4];
-			$i++;
+			$maskKey = substr($data, $offset, 4);
+			$offset += 4;
 		}
 
-		return $out;
+		if ($bufLen < $offset + $payloadLen) return null;
+
+		$payload = ($payloadLen > 0) ? substr($data, $offset, $payloadLen) : '';
+
+		$consumed = $offset + $payloadLen;
+		$data = ($consumed < $bufLen) ? substr($data, $consumed) : '';
+
+		if ($masked && $payloadLen > 0) {
+			$out = '';
+			$i = 0;
+
+			while ($i < $payloadLen) {
+				$out .= $payload[$i] ^ $maskKey[$i % 4];
+
+				$i++;
+			}
+
+			$payload = $out;
+		}
+
+		if ($opcode === self::OP_PING) {
+			// TODO: handle ping event
+			//if ($client !== null)
+			//$client->Send(self::FrameOut($payload, self::OP_PONG));
+
+			return false;
+		}
+
+		if ($opcode === self::OP_PONG) {
+			// TODO: handle pong event
+			return false;
+		}
+
+		if ($opcode === self::OP_CLOSE) {
+			// TODO: handle close event
+			//if ($client !== null)
+			//$client->TriggerClose();
+
+			return false;
+		}
+
+		if ($opcode === self::OP_CONTINUATION) {
+			$this->_msgBuffer .= $payload;
+
+			if (!$fin)
+				return false;
+
+			$complete = $this->_msgBuffer;
+
+			$this->_msgBuffer = '';
+			$this->_fragmentedOpcode = null;
+
+			return $complete;
+		}
+
+		if (!$fin) {
+			$this->_msgBuffer = $payload;
+			$this->_fragmentedOpcode = $opcode;
+
+			return false;
+		}
+
+		return $payload;
 	}
-	
+
 	/**
 	 * @param string $data
-	 * @param int $op = self::OP_TEXT
+	 * @param int $op
 	 *
 	 * @return string
 	 */
 	public static function FrameOut ($data, $op = self::OP_TEXT) {
 		$length = strlen($data);
-		$out = pack('C', $op | 0x80);
-		
-		if ($length > 125 && $length <= 0xffff)
-			return $out . pack('Cn', 126, $length) . $data;
-		
-		if ($length > 0xffff)
-			return $out . pack('CNN', 127, 0, $length) . $data;
-		
-		return $out . pack('C', $length) . $data;
+		$firstByte = 0x80 | ($op & 0x0f); // FIN + opcode
+		$header = chr($firstByte);
+
+		if ($length <= 125) {
+			$header .= chr($length);
+		}
+		elseif ($length <= 0xffff) {
+			$header .= chr(126) . pack('n', $length); // 2 bytes for length
+		}
+		else {
+			// 64-bit length (network order)
+			// pack('J') not portable, using two 32-bit numbers (big-endian)
+			$hi = ($length & 0xffffffff00000000) >> 32;
+			$lo = $length & 0xffffffff;
+			$header .= chr(127) . pack('NN', $hi, $lo);
+		}
+
+		return $header . $data;
 	}
 }
