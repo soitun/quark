@@ -1,6 +1,7 @@
 <?php
 namespace Quark\Extensions\VersionControl\Providers;
 
+use Quark\Quark;
 use Quark\QuarkKeyValuePair;
 
 use Quark\Extensions\VersionControl\IQuarkVersionControlProvider;
@@ -74,5 +75,31 @@ class GitVCS implements IQuarkVersionControlProvider {
 	 */
 	public function VCSLastLog () {
 		// TODO: Implement VCSLastLog() method.
+	}
+
+	/**
+	 * @param string $location = ''
+	 *
+	 * @return QuarkKeyValuePair
+	 */
+	public function Revision ($location = '') {
+		if (func_num_args() == 0)
+			$location = Quark::Host();
+
+		$out = [];
+		$code = 0;
+
+		exec('git -C ' . $location . ' rev-parse --short HEAD', $out, $code);
+		if ($code !== 0 || empty($out[0])) return null;
+
+		$hash = trim($out[0]);
+
+		$out1 = []; // tracked / staged
+		exec('git -C ' . $location . ' diff-index --quiet HEAD --', $out1, $code1);
+
+		$out2 = []; // untracked / modified
+		exec('git -C ' . $location . ' diff-files --quiet', $out2, $code2);
+
+		return new QuarkKeyValuePair($hash, $code1 === 0 && $code2 === 0);
 	}
 }
