@@ -20008,9 +20008,15 @@ class QuarkStreamEnvironment implements IQuarkEnvironment, IQuarkCluster {
 	 * @return array
 	 */
 	private function _batch ($data = '', $buffer = '') {
-		return self::$_json->BatchDecode($data, $buffer, array(
-			QuarkJSONIOProcessor::BATCH_MARK_OBJECT => '}~{'
-		));
+		return self::$_json->BatchDecode(
+			$data, $buffer,
+			array(
+				QuarkJSONIOProcessor::BATCH_MARK_OBJECT => '}~{'
+			),
+			function ($raw) {
+				return substr($raw, 0, 7) == '{"url":';
+			}
+		);
 	}
 
 	/**
@@ -26306,10 +26312,11 @@ class QuarkJSONIOProcessor implements IQuarkIOProcessor {
 	 * @param string $raw = ''
 	 * @param string $buffer = ''
 	 * @param string[] $marks = []
+	 * @param callable $recognizer = null
 	 *
 	 * @return array
 	 */
-	public function BatchDecode ($raw = '', $buffer = '', $marks = []) {
+	public function BatchDecode ($raw = '', $buffer = '', $marks = [], callable $recognizer = null) {
 		if (func_num_args() < 3)
 			$marks = array(
 				self::BATCH_MARK_OBJECT => '}~{',
@@ -26329,6 +26336,9 @@ class QuarkJSONIOProcessor implements IQuarkIOProcessor {
 			$raw = preg_replace($markA, str_replace('~', $sep, $markB), $raw);
 
 		unset($markA, $markB, $marks);
+
+		if ($recognizer != null && $this->_buffer[$buffer] != '' && $recognizer($raw))
+			$this->_buffer[$buffer] = '';
 
 		$this->_buffer[$buffer] .= $raw;
 
